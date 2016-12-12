@@ -161,7 +161,8 @@ impl<'a> Calc<'a> {
 
     fn factorial(&self, n: f64) -> Result<f64, String> {
         if n.floor() != n || n < 0.0 {
-            return Err("Factorial is only valid on the natural numbers (1, 2, 3... N)".to_string());
+            return Err("Factorial is only valid on the natural numbers (0, 1, 2, ... n)"
+                .to_string());
         }
 
         if n == 0.0 {
