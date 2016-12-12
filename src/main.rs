@@ -180,7 +180,6 @@ impl<'a> Calc<'a> {
         self.primary().and_then(|left| {
             let mut left = left;
             while let Some(token) = self.ts.get() {
-                let token = token.unwrap();
                 match token.kind {
                     TokenKind::Factorial => left = self.factorial(left)?,
                     TokenKind::Exponent => left = left.powf(self.primary()?), 
