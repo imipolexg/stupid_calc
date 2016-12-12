@@ -1,7 +1,6 @@
 use std::io;
 use std::io::BufRead;
-use std::collections::VecDeque;
-use std::collections::BTreeMap;
+use std::collections::{VecDeque, BTreeMap};
 
 fn main() {
     let stdin = io::stdin();
@@ -23,7 +22,14 @@ impl<'a> Calc<'a> {
         }
     }
 
+    fn constants(&mut self) {
+        self.define_symbol("pi".to_string(), 3.141592653589);
+        self.define_symbol("e".to_string(), 2.718281828459);
+    }
+
     fn run(&mut self) {
+        self.constants();
+
         while let Some(token) = self.ts.get() {
             match token.kind {
                 TokenKind::Terminator => {
@@ -319,6 +325,14 @@ impl<'a> TokenStream<'a> {
         }
     }
 
+    fn add_token(&mut self, kind: TokenKind, value: Option<f64>, name: Option<String>) {
+        self.stream.push_back(Token {
+            kind: kind,
+            value: value,
+            name: name,
+        });
+    }
+
     fn finish_token(&mut self, terminator: Option<TokenKind>) {
         let token = self.current_token.take();
 
@@ -326,39 +340,24 @@ impl<'a> TokenStream<'a> {
             let token = token.unwrap();
 
             if token == "let" {
-                self.stream.push_back(Token {
-                    kind: TokenKind::Let,
-                    value: None,
-                    name: None,
-                });
+                self.add_token(TokenKind::Let, None, None);
             } else {
                 match token.chars().nth(0).unwrap() {
                     '0'...'9' => {
-                        let err = format!("Not a valid f64: {}", token);
-                        let value: f64 = token.parse().expect(&err);
-                        self.stream.push_back(Token {
-                            kind: TokenKind::Number,
-                            value: Some(value),
-                            name: None,
-                        });
+                        let value: f64 = token.parse()
+                            .expect(&format!("Not a valid f64: {}", token));
+
+                        self.add_token(TokenKind::Number, Some(value), None);
                     }
                     _ => {
-                        self.stream.push_back(Token {
-                            kind: TokenKind::Identifier,
-                            value: None,
-                            name: Some(token),
-                        });
+                        self.add_token(TokenKind::Identifier, None, Some(token));
                     }
                 }
             }
         }
 
         if terminator.is_some() {
-            self.stream.push_back(Token {
-                kind: terminator.unwrap(),
-                value: None,
-                name: None,
-            });
+            self.add_token(terminator.unwrap(), None, None);
         }
     }
 }
