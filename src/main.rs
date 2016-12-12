@@ -110,23 +110,18 @@ impl<'a> Calc<'a> {
         self.term().and_then(|left| {
             let mut left = left;
 
-            loop {
-                let token = self.ts.get();
-                if token.is_none() {
-                    return Ok(left);
-                }
-
-                let token = token.unwrap();
+            while let Some(token) = self.ts.get() {
                 match token.kind {
                     TokenKind::Plus => left += self.term()?,
                     TokenKind::Minus => left -= self.term()?, 
                     TokenKind::Modulo => left = left % self.term()?,
                     _ => {
                         self.ts.putback(token);
-                        return Ok(left);
+                        break;
                     }
                 }
             }
+            Ok(left)
         })
     }
 
@@ -137,13 +132,7 @@ impl<'a> Calc<'a> {
         self.secondary().and_then(|left| {
             let mut left = left;
 
-            loop {
-                let token = self.ts.get();
-                if token.is_none() {
-                    return Ok(left);
-                }
-
-                let token = token.unwrap();
+            while let Some(token) = self.ts.get() {
                 match token.kind {
                     TokenKind::Multiply => left *= self.secondary()?, 
                     TokenKind::Divide => {
@@ -161,10 +150,12 @@ impl<'a> Calc<'a> {
                     }
                     _ => {
                         self.ts.putback(token);
-                        return Ok(left);
+                        break;
                     }
                 }
             }
+
+            Ok(left)
         })
     }
 
@@ -187,24 +178,19 @@ impl<'a> Calc<'a> {
 
     fn secondary(&mut self) -> Result<f64, String> {
         self.primary().and_then(|left| {
-            loop {
-                let token = self.ts.get();
-                if token.is_none() {
-                    return Ok(left);
-                }
-
+            let mut left = left;
+            while let Some(token) = self.ts.get() {
                 let token = token.unwrap();
                 match token.kind {
-                    TokenKind::Factorial => return self.factorial(left),
-                    TokenKind::Exponent => {
-                        return Ok(left.powf(self.primary()?));
-                    }
+                    TokenKind::Factorial => left = self.factorial(left)?,
+                    TokenKind::Exponent => left = left.powf(self.primary()?), 
                     _ => {
                         self.ts.putback(token);
-                        return Ok(left);
+                        break;
                     }
                 }
             }
+            Ok(left)
         })
     }
 
