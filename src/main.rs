@@ -292,7 +292,7 @@ impl<'a> TokenStream<'a> {
     fn tokenize(&mut self, tokensource: &str) {
         for c in tokensource.chars() {
             match c {
-                ';' => self.finish_token(Some(TokenKind::Terminator)),
+                ';' | '\n' => self.finish_token(Some(TokenKind::Terminator)),
                 '+' => self.finish_token(Some(TokenKind::Plus)),
                 '-' => self.finish_token(Some(TokenKind::Minus)),
                 '*' => self.finish_token(Some(TokenKind::Multiply)),
@@ -305,7 +305,7 @@ impl<'a> TokenStream<'a> {
                 ')' => self.finish_token(Some(TokenKind::RParen)),
                 // See https://gist.github.com/Dethnull/9613129 to get a better list of utf-8
                 // whitespace characters
-                '\n' | ' ' | '\r' | '\t' => self.finish_token(None),
+                ' ' | '\r' | '\t' => self.finish_token(None),
                 _ => {
                     // This feels unnatural but it pleased the borrow checker
                     if self.current_token.is_some() {
