@@ -127,6 +127,7 @@ impl<'a> Calc<'a> {
                     }
                 }
             }
+
             Ok(left)
         })
     }
@@ -196,6 +197,7 @@ impl<'a> Calc<'a> {
                     }
                 }
             }
+
             Ok(left)
         })
     }
@@ -241,6 +243,7 @@ pub enum TokenKind {
     Number,
     Plus,
     RParen,
+    Sqrt,
     Terminator,
     Times,
 }
@@ -339,18 +342,24 @@ impl<'a> TokenStream<'a> {
         if token.is_some() {
             let token = token.unwrap();
 
-            if token == "let" {
-                self.add_token(TokenKind::Let, None, None);
-            } else {
-                match token.chars().nth(0).unwrap() {
-                    '0'...'9' => {
-                        let value: f64 = token.parse()
-                            .expect(&format!("Not a valid f64: {}", token));
+            match token.as_ref() {
+                "let" => {
+                    self.add_token(TokenKind::Let, None, None);
+                }
+                "sqrt" => {
+                    self.add_token(TokenKind::Sqrt, None, None);
+                }
+                _ => {
+                    match token.chars().nth(0).unwrap() {
+                        '0'...'9' => {
+                            let value: f64 = token.parse()
+                                .expect(&format!("Not a valid f64: {}", token));
 
-                        self.add_token(TokenKind::Number, Some(value), None);
-                    }
-                    _ => {
-                        self.add_token(TokenKind::Identifier, None, Some(token));
+                            self.add_token(TokenKind::Number, Some(value), None);
+                        }
+                        _ => {
+                            self.add_token(TokenKind::Identifier, None, Some(token));
+                        }
                     }
                 }
             }
