@@ -1,35 +1,28 @@
 use std::io;
-use std::io::BufRead;
+use std::io::{Read, BufRead};
 use std::collections::{VecDeque, BTreeMap};
 
 fn main() {
     let stdin = io::stdin();
     let mut stdin = stdin.lock(); // Locking stdin gives us access to std::io::BufRead
     let mut calc = Calc::new(TokenStream::new(&mut stdin), BTreeMap::new());
-    calc.run();
+    calc.run_repl();
 }
 
-struct Calc<'a> {
+pub struct Calc<'a> {
     ts: TokenStream<'a>,
     symtab: BTreeMap<String, f64>,
 }
 
 impl<'a> Calc<'a> {
-    fn new(ts: TokenStream<'a>, symtab: BTreeMap<String, f64>) -> Self {
+    pub fn new(ts: TokenStream<'a>, symtab: BTreeMap<String, f64>) -> Self {
         Calc {
             ts: ts,
             symtab: symtab,
         }
     }
 
-    fn constants(&mut self) {
-        self.define_symbol("pi".to_string(), 3.141592653589);
-        self.define_symbol("e".to_string(), 2.718281828459);
-    }
-
-    fn run(&mut self) {
-        self.constants();
-
+    pub fn run_repl(&mut self) {
         while let Some(token) = self.ts.get() {
             match token.kind {
                 TokenKind::Terminator => {
@@ -50,18 +43,36 @@ impl<'a> Calc<'a> {
         }
     }
 
-    fn define_symbol(&mut self, sym: String, val: f64) {
+    pub fn run(&mut self) -> Result<f64, String> {
+        let mut result: Result<f64, String> = Ok(0.0);
+
+        while let Some(token) = self.ts.get() {
+            match token.kind {
+                TokenKind::Terminator => {
+                    continue;
+                }
+                _ => {
+                    self.ts.putback(token);
+                    result = Ok(self.statement()?);
+                }
+            }
+        }
+
+        result
+    }
+
+    pub fn define_symbol(&mut self, sym: String, val: f64) {
         self.symtab.insert(sym, val);
     }
 
-    fn get_symbol(&self, sym: String) -> Result<f64, String> {
+    pub fn get_symbol(&self, sym: String) -> Result<f64, String> {
         self.symtab.get(&sym).ok_or(format!("No such symbol '{}' defined", sym)).map(|val| *val)
     }
 
     /**
      * Statement = Declaration | Expression
      */
-    fn statement(&mut self) -> Result<f64, String> {
+    pub fn statement(&mut self) -> Result<f64, String> {
         let token = self.ts.get().expect("statement() called out of order");
 
         match token.kind {
@@ -78,7 +89,7 @@ impl<'a> Calc<'a> {
      *
      * Let has already been consumed by Statement
      */
-    fn declaration(&mut self) -> Result<f64, String> {
+    pub fn declaration(&mut self) -> Result<f64, String> {
         let token = self.ts.get().expect("declaration() called out of order");
 
         if let TokenKind::Identifier = token.kind {
@@ -112,7 +123,7 @@ impl<'a> Calc<'a> {
     /**
      * Expression = Term | Expression "+" Term | Expression "-" Term | Expression "%" Term
      */
-    fn expression(&mut self) -> Result<f64, String> {
+    pub fn expression(&mut self) -> Result<f64, String> {
         self.term().and_then(|left| {
             let mut left = left;
 
@@ -134,7 +145,7 @@ impl<'a> Calc<'a> {
     /**
      * Term = Secondary | Term "*" Secondary | Term "/" Secondary 
      */
-    fn term(&mut self) -> Result<f64, String> {
+    pub fn term(&mut self) -> Result<f64, String> {
         self.secondary().and_then(|left| {
             let mut left = left;
 
@@ -165,7 +176,7 @@ impl<'a> Calc<'a> {
         })
     }
 
-    fn factorial(&self, n: f64) -> Result<f64, String> {
+    pub fn factorial(&self, n: f64) -> Result<f64, String> {
         if n.floor() != n || n < 0.0 {
             return Err("Factorial is only valid on the natural numbers (0, 1, 2, ... n)"
                 .to_string());
@@ -183,7 +194,7 @@ impl<'a> Calc<'a> {
         Ok(val)
     }
 
-    fn secondary(&mut self) -> Result<f64, String> {
+    pub fn secondary(&mut self) -> Result<f64, String> {
         self.primary().and_then(|left| {
             let mut left = left;
             while let Some(token) = self.ts.get() {
@@ -200,7 +211,7 @@ impl<'a> Calc<'a> {
         })
     }
 
-    fn primary(&mut self) -> Result<f64, String> {
+    pub fn primary(&mut self) -> Result<f64, String> {
         let token = self.ts.get().expect("Primary called out of order");
 
         match token.kind {
@@ -253,23 +264,23 @@ pub struct Token {
 }
 
 pub struct TokenStream<'a> {
-    file: &'a mut BufRead,
+    source: &'a mut BufRead,
     stream: VecDeque<Token>,
     current_token: Option<String>,
 }
 
 impl<'a> TokenStream<'a> {
-    pub fn new(file: &'a mut BufRead) -> Self {
+    pub fn new(source: &'a mut BufRead) -> Self {
         TokenStream {
-            file: file,
+            source: source,
             stream: VecDeque::new(),
             current_token: None,
         }
     }
 
     /**
-     * Get the next token. If there are no tokens ready, parse the input file for more.  If the
-     * file is EOF, return None
+     * Get the next token. If there are no tokens ready, parse the input for more.  If the file is
+     * EOF, return None
      */
     pub fn get(&mut self) -> Option<Token> {
         self.stream.pop_front().or_else(|| {
@@ -289,14 +300,14 @@ impl<'a> TokenStream<'a> {
     pub fn parse_line(&mut self) {
         let mut buf = String::new();
 
-        if let 0 = self.file.read_line(&mut buf).expect("i/o failure") {
+        if let 0 = self.source.read_line(&mut buf).expect("i/o failure") {
             return;
         }
 
         self.tokenize(&buf);
     }
 
-    fn tokenize(&mut self, tokensource: &str) {
+    pub fn tokenize(&mut self, tokensource: &str) {
         for c in tokensource.chars() {
             match c {
                 ';' | '\n' => self.finish_token(Some(TokenKind::Terminator)),
@@ -325,7 +336,7 @@ impl<'a> TokenStream<'a> {
         }
     }
 
-    fn add_token(&mut self, kind: TokenKind, value: Option<f64>, name: Option<String>) {
+    pub fn add_token(&mut self, kind: TokenKind, value: Option<f64>, name: Option<String>) {
         self.stream.push_back(Token {
             kind: kind,
             value: value,
@@ -333,7 +344,7 @@ impl<'a> TokenStream<'a> {
         });
     }
 
-    fn finish_token(&mut self, terminator: Option<TokenKind>) {
+    pub fn finish_token(&mut self, terminator: Option<TokenKind>) {
         let token = self.current_token.take();
 
         if token.is_some() {
@@ -360,4 +371,68 @@ impl<'a> TokenStream<'a> {
             self.add_token(terminator.unwrap(), None, None);
         }
     }
+}
+
+pub struct StringReader {
+    string: String,
+    cursor: usize,
+}
+
+// An implementation of the Read trait for Strings to test TokenStream without needing a file.
+impl StringReader {
+    pub fn new(string: String) -> Self {
+        StringReader {
+            string: string.clone(),
+            cursor: 0,
+        }
+    }
+}
+
+impl Read for StringReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let bytes = self.string.as_bytes();
+
+        let remaining = bytes.len() - self.cursor;
+        let buflen = buf.len();
+        let readsize = if remaining < buflen {
+            remaining
+        } else {
+            buflen
+        };
+
+        for i in 0..readsize {
+            buf[i] = bytes[self.cursor];
+            self.cursor += 1;
+        }
+
+        Ok(readsize as usize)
+    }
+}
+
+
+#[cfg(test)]
+mod test {
+    use std::io::Read;
+    use super::{StringReader, TokenStream, TokenKind, Token, Calc};
+
+    #[test]
+    fn string_reader_test() {
+        let s = "yo yo what up yo, time is running out";
+        let mut sreader = StringReader::new(s.to_string());
+        let mut buf: [u8; 8] = [0; 8];
+
+        assert_eq!(sreader.read(&mut buf).unwrap(), 8 as usize);
+        assert_eq!(buf[0..8], s.as_bytes()[0..8]);
+        assert_eq!(sreader.read(&mut buf).unwrap(), 8 as usize);
+        assert_eq!(buf[0..8], s.as_bytes()[8..16]);
+        assert_eq!(sreader.read(&mut buf).unwrap(), 8 as usize);
+        assert_eq!(buf[0..8], s.as_bytes()[16..24]);
+        assert_eq!(sreader.read(&mut buf).unwrap(), 8 as usize);
+        assert_eq!(buf[0..8], s.as_bytes()[24..32]);
+        assert_eq!(sreader.read(&mut buf).unwrap(), 5 as usize);
+        assert_eq!(buf[0..5], s.as_bytes()[32..37]);
+    }
+
+    #[test]
+    fn tokenstream_tests() {}
 }
