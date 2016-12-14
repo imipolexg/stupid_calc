@@ -239,7 +239,7 @@ impl<'a> Calc<'a> {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum TokenKind {
     Divide,
     Exponent,
@@ -259,7 +259,7 @@ pub enum TokenKind {
     Times,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
     pub value: Option<f64>,
@@ -421,13 +421,14 @@ impl Read for StringReader {
 
 #[cfg(test)]
 mod test {
-    use std::io::Read;
+    use std::io::{Read, BufReader};
     use super::{StringReader, TokenStream, TokenKind, Token, Calc};
 
     #[test]
     fn string_reader_test() {
         let s = "yo yo what up yo, time is running out";
-        let mut sreader = StringReader::new(s.to_string());
+        let s_string = s.to_string();
+        let mut sreader = StringReader::new(s_string.clone());
         let mut buf: [u8; 8] = [0; 8];
 
         assert_eq!(sreader.read(&mut buf).unwrap(), 8 as usize);
@@ -440,8 +441,36 @@ mod test {
         assert_eq!(buf[0..8], s.as_bytes()[24..32]);
         assert_eq!(sreader.read(&mut buf).unwrap(), 5 as usize);
         assert_eq!(buf[0..5], s.as_bytes()[32..37]);
+
+        let mut sreader = StringReader::new(s_string.clone());
+        let mut stringbuf = String::new();
+        sreader.read_to_string(&mut stringbuf);
+        assert_eq!(s_string, stringbuf);
     }
 
     #[test]
-    fn tokenstream_tests() {}
+    fn tokenstream_tests() {
+        let kant = "5 + 7;".to_string();
+
+        let mut kantbuf = BufReader::new(StringReader::new(kant));
+        let mut ts = TokenStream::new(&mut kantbuf);
+        assert_eq!(ts.get(),
+                   Some(Token {
+                       kind: TokenKind::Number,
+                       value: Some(5.0),
+                       name: None,
+                   }));
+        assert_eq!(ts.get(),
+                   Some(Token {
+                       kind: TokenKind::Plus,
+                       value: None,
+                       name: None,
+                   }));
+        assert_eq!(ts.get(),
+                   Some(Token {
+                       kind: TokenKind::Number,
+                       value: Some(7.0),
+                       name: None,
+                   }));
+    }
 }
