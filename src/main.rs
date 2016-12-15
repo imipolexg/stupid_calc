@@ -169,8 +169,8 @@ impl<'a> Calc<'a> {
                             Ok(val) => {
                                 left /= val;
                             }
-                            Err(msg) => {
-                                return Err(msg);
+                            Err(err) => {
+                                return Err(err);
                             }
                         }
                     }
