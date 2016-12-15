@@ -1,3 +1,7 @@
+/// calc
+///
+/// A recursive descent parser for arithmetic expressions, with a symbol table.
+
 use std::io;
 use std::io::{Read, BufRead};
 use std::collections::{VecDeque, BTreeMap};
@@ -7,6 +11,15 @@ fn main() {
     let mut stdin = stdin.lock(); // Locking stdin gives us access to std::io::BufRead
     let mut calc = Calc::new(TokenStream::new(&mut stdin));
     calc.run_repl();
+}
+
+pub type CalcResult = Result<f64, SyntaxError>;
+
+#[derive(Debug, PartialEq)]
+pub enum SyntaxError {
+    UnexpectedToken(TokenKind, Option<TokenKind>),
+    InvalidToken(Option<Token>, String),
+    UnknownSymbol(String),
 }
 
 pub struct Calc<'a> {
@@ -34,8 +47,8 @@ impl<'a> Calc<'a> {
                         Ok(calculation) => {
                             println!("= {}", calculation);
                         }
-                        Err(msg) => {
-                            println!("Error: {}", msg);
+                        Err(err) => {
+                            println!("Error: {:?}", err);
                         }
                     }
                 }
@@ -43,8 +56,8 @@ impl<'a> Calc<'a> {
         }
     }
 
-    pub fn run(&mut self) -> Result<f64, String> {
-        let mut result: Result<f64, String> = Ok(0.0);
+    pub fn run(&mut self) -> CalcResult {
+        let mut result: CalcResult = Ok(0.0);
 
         while let Some(token) = self.ts.get() {
             match token.kind {
@@ -65,13 +78,12 @@ impl<'a> Calc<'a> {
         self.symtab.insert(sym, val);
     }
 
-    pub fn get_symbol(&self, sym: String) -> Result<f64, String> {
-        self.symtab.get(&sym).ok_or(format!("No such symbol '{}' defined", sym)).map(|val| *val)
+    pub fn get_symbol(&self, sym: String) -> CalcResult {
+        self.symtab.get(&sym).ok_or(SyntaxError::UnknownSymbol(sym)).map(|val| *val)
     }
 
-
     /// Statement = Declaration | Expression
-    pub fn statement(&mut self) -> Result<f64, String> {
+    pub fn statement(&mut self) -> CalcResult {
         let token = self.ts.get().expect("statement() called out of order");
         let result;
 
@@ -88,7 +100,7 @@ impl<'a> Calc<'a> {
 
     /// Declaration = "let" Name "=" Expression
     /// "let" has already been consumed by Statement
-    pub fn declaration(&mut self) -> Result<f64, String> {
+    pub fn declaration(&mut self) -> CalcResult {
         let token = self.ts.get().expect("declaration() called out of order");
 
         if let TokenKind::Identifier = token.kind {
@@ -102,25 +114,25 @@ impl<'a> Calc<'a> {
                                 self.define_symbol(sym, val);
                                 return Ok(val);
                             }
-                            Err(msg) => {
-                                return Err(msg);
+                            Err(err) => {
+                                return Err(err);
                             }
                         }
                     }
 
-                    return Err(format!("Expected '=', found {:?}", next.kind));
+                    return Err(SyntaxError::UnexpectedToken(TokenKind::Is, Some(next.kind)));
                 }
                 _ => {
-                    return Err(format!("Expected '=', found nothing"));
+                    return Err(SyntaxError::UnexpectedToken(TokenKind::Is, None));
                 }
             }
         }
 
-        Err(format!("Expected identifier, found {:?}", token.kind))
+        Err(SyntaxError::UnexpectedToken(TokenKind::Identifier, Some(token.kind)))
     }
 
     /// Expression = Term | Expression "+" Term | Expression "-" Term | Expression "%" Term
-    pub fn expression(&mut self) -> Result<f64, String> {
+    pub fn expression(&mut self) -> CalcResult {
         self.term().and_then(|left| {
             let mut left = left;
 
@@ -141,7 +153,7 @@ impl<'a> Calc<'a> {
     }
 
     /// Term = Secondary | Term "*" Secondary | Term "/" Secondary
-    pub fn term(&mut self) -> Result<f64, String> {
+    pub fn term(&mut self) -> CalcResult {
         self.secondary().and_then(|left| {
             let mut left = left;
 
@@ -151,7 +163,8 @@ impl<'a> Calc<'a> {
                     TokenKind::Divide => {
                         match self.secondary() {
                             Ok(0.0) => {
-                                return Err("Divide by zero".to_string());
+                                return Err(SyntaxError::InvalidToken(Some(token),
+                                                                     "Divide by zero".to_string()));
                             }
                             Ok(val) => {
                                 left /= val;
@@ -190,13 +203,20 @@ impl<'a> Calc<'a> {
         Ok(val)
     }
 
-    /// Secondary = Primary | Primary "!" | Primary^Primary
-    pub fn secondary(&mut self) -> Result<f64, String> {
+    /// Secondary = Primary | Primary "!" | Primary "^" Primary
+    pub fn secondary(&mut self) -> CalcResult {
         self.primary().and_then(|left| {
             let mut left = left;
             while let Some(token) = self.ts.get() {
                 match token.kind {
-                    TokenKind::Factorial => left = self.naive_factorial(left)?,
+                    TokenKind::Factorial => {
+                        match self.naive_factorial(left) {
+                            Ok(factorial) => left = factorial,
+                            Err(msg) => {
+                                return Err(SyntaxError::InvalidToken(None, msg));
+                            }
+                        }
+                    }
                     TokenKind::Exponent => left = left.powf(self.primary()?),
                     _ => {
                         self.ts.putback(token);
@@ -210,7 +230,7 @@ impl<'a> Calc<'a> {
     }
 
     /// Primary = "(" Expression ")" | Identifier | "-" Primary | "+" Primary | Number
-    pub fn primary(&mut self) -> Result<f64, String> {
+    pub fn primary(&mut self) -> CalcResult {
         let token = self.ts.get().expect("primary() called out of order");
         match token.kind {
             TokenKind::LParen => {
@@ -218,11 +238,14 @@ impl<'a> Calc<'a> {
                 // Look for closing parentheses
                 self.ts
                     .get()
-                    .ok_or("Expected ')', found nothing".to_string())
+                    .ok_or(SyntaxError::UnexpectedToken(TokenKind::LParen, None))
                     .and_then(|token| {
                         match token.kind {
                             TokenKind::RParen => Ok(expr),
-                            _ => Err(format!("Expected ')', but found {:?}", token.kind)),
+                            _ => {
+                                Err(SyntaxError::UnexpectedToken(TokenKind::RParen,
+                                                                 Some(token.kind)))
+                            }
                         }
                     })
             }
@@ -231,9 +254,10 @@ impl<'a> Calc<'a> {
             TokenKind::Plus => self.primary(),
             TokenKind::Number => Ok(token.value.expect("There should've been a value here")),
             _ => {
-                Err(format!("Expected a number, identifier or parenthetical expression, but got \
-                             {:?}",
-                            token.kind))
+                let msg = format!("Expected a number, identifier or parenthetical expression, \
+                                   but got {:?}",
+                                  token.kind);
+                Err(SyntaxError::InvalidToken(Some(token), msg))
             }
         }
     }
@@ -425,7 +449,7 @@ impl Read for StringReader {
 #[cfg(test)]
 mod test {
     use std::io::{Read, BufReader};
-    use super::{StringReader, TokenStream, TokenKind, Token, Calc};
+    use super::{StringReader, TokenStream, TokenKind, Token, Calc, CalcResult, SyntaxError};
 
     #[test]
     fn string_reader_test() {
@@ -514,10 +538,20 @@ mod test {
         assert_eq!(calculate("-31337"), Ok(-31337.0));
         assert_eq!(calculate("0.25^2"), Ok(0.0625));
         assert_eq!(calculate("1*2*3*4*5*6*7*8*9"), Ok(362880.0));
+        assert_eq!(calculate("(0.2+0.05)^2"), Ok(0.0625));
+    }
+
+    #[test]
+    fn error_tests() {
+        assert_eq!(calculate("a"),
+                   Err(SyntaxError::UnknownSymbol("a".to_string())));
     }
 
     #[test]
     fn factorial_tests() {
+        assert_eq!(calculate("(2^3)!"), Ok(40320.0));
+        assert_eq!(calculate("2!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"), Ok(2.0));
+        assert_eq!(calculate("3!!"), Ok(720.0));
         assert_eq!(calculate("0!"), Ok(1.0));
         assert_eq!(calculate("1!"), Ok(1.0));
         assert_eq!(calculate("2!"), Ok(2.0));
@@ -549,7 +583,7 @@ mod test {
         // assert_eq!(calculate("30!"), Ok(265252859812191058636308480000000.0));
     }
 
-    fn calculate(stmt: &str) -> Result<f64, String> {
+    fn calculate(stmt: &str) -> CalcResult {
         let stmt_str = stmt.to_string();
         let mut buf = BufReader::new(StringReader::new(stmt_str));
         let mut calculator = Calc::new(TokenStream::new(&mut buf));
