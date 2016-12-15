@@ -69,9 +69,8 @@ impl<'a> Calc<'a> {
         self.symtab.get(&sym).ok_or(format!("No such symbol '{}' defined", sym)).map(|val| *val)
     }
 
-    /**
-     * Statement = Declaration | Expression
-     */
+
+    /// Statement = Declaration | Expression
     pub fn statement(&mut self) -> Result<f64, String> {
         let token = self.ts.get().expect("statement() called out of order");
         let result;
@@ -87,11 +86,8 @@ impl<'a> Calc<'a> {
         result
     }
 
-    /**
-     * Declaration = "let" Name "=" Expression
-     *
-     * Let has already been consumed by Statement
-     */
+    /// Declaration = "let" Name "=" Expression
+    /// "let" has already been consumed by Statement
     pub fn declaration(&mut self) -> Result<f64, String> {
         let token = self.ts.get().expect("declaration() called out of order");
 
@@ -123,9 +119,7 @@ impl<'a> Calc<'a> {
         Err(format!("Expected identifier, found {:?}", token.kind))
     }
 
-    /**
-     * Expression = Term | Expression "+" Term | Expression "-" Term | Expression "%" Term
-     */
+    /// Expression = Term | Expression "+" Term | Expression "-" Term | Expression "%" Term
     pub fn expression(&mut self) -> Result<f64, String> {
         self.term().and_then(|left| {
             let mut left = left;
@@ -196,6 +190,7 @@ impl<'a> Calc<'a> {
         Ok(val)
     }
 
+    /// Secondary = Primary | Primary "!" | Primary^Primary
     pub fn secondary(&mut self) -> Result<f64, String> {
         self.primary().and_then(|left| {
             let mut left = left;
@@ -214,6 +209,7 @@ impl<'a> Calc<'a> {
         })
     }
 
+    /// Primary = "(" Expression ")" | Identifier | "-" Primary | "+" Primary | Number
     pub fn primary(&mut self) -> Result<f64, String> {
         let token = self.ts.get().expect("primary() called out of order");
         match token.kind {
@@ -234,7 +230,11 @@ impl<'a> Calc<'a> {
             TokenKind::Minus => self.primary().map(|val| -val),
             TokenKind::Plus => self.primary(),
             TokenKind::Number => Ok(token.value.expect("There should've been a value here")),
-            _ => Err(format!("Expected a number, but got {:?}", token.kind)),
+            _ => {
+                Err(format!("Expected a number, identifier or parenthetical expression, but got \
+                             {:?}",
+                            token.kind))
+            }
         }
     }
 }
