@@ -5,7 +5,7 @@ use std::collections::{VecDeque, BTreeMap};
 fn main() {
     let stdin = io::stdin();
     let mut stdin = stdin.lock(); // Locking stdin gives us access to std::io::BufRead
-    let mut calc = Calc::new(TokenStream::new(&mut stdin), BTreeMap::new());
+    let mut calc = Calc::new(TokenStream::new(&mut stdin));
     calc.run_repl();
 }
 
@@ -15,17 +15,17 @@ pub struct Calc<'a> {
 }
 
 impl<'a> Calc<'a> {
-    pub fn new(ts: TokenStream<'a>, symtab: BTreeMap<String, f64>) -> Self {
+    pub fn new(ts: TokenStream<'a>) -> Self {
         Calc {
             ts: ts,
-            symtab: symtab,
+            symtab: BTreeMap::new(),
         }
     }
 
     pub fn run_repl(&mut self) {
         while let Some(token) = self.ts.get() {
             match token.kind {
-                TokenKind::Terminator => {
+                TokenKind::Terminator | TokenKind::EOF => {
                     continue;
                 }
                 _ => {
@@ -48,7 +48,7 @@ impl<'a> Calc<'a> {
 
         while let Some(token) = self.ts.get() {
             match token.kind {
-                TokenKind::Terminator => {
+                TokenKind::Terminator | TokenKind::EOF => {
                     continue;
                 }
                 _ => {
@@ -74,14 +74,17 @@ impl<'a> Calc<'a> {
      */
     pub fn statement(&mut self) -> Result<f64, String> {
         let token = self.ts.get().expect("statement() called out of order");
+        let result;
 
         match token.kind {
-            TokenKind::Let => self.declaration(),
+            TokenKind::Let => result = self.declaration(),
             _ => {
                 self.ts.putback(token);
-                self.expression()
+                result = self.expression();
             }
         }
+
+        result
     }
 
     /**
@@ -130,7 +133,7 @@ impl<'a> Calc<'a> {
             while let Some(token) = self.ts.get() {
                 match token.kind {
                     TokenKind::Plus => left += self.term()?,
-                    TokenKind::Minus => left -= self.term()?, 
+                    TokenKind::Minus => left -= self.term()?,
                     TokenKind::Modulo => left = left % self.term()?,
                     _ => {
                         self.ts.putback(token);
@@ -143,16 +146,14 @@ impl<'a> Calc<'a> {
         })
     }
 
-    /**
-     * Term = Secondary | Term "*" Secondary | Term "/" Secondary 
-     */
+    /// Term = Secondary | Term "*" Secondary | Term "/" Secondary
     pub fn term(&mut self) -> Result<f64, String> {
         self.secondary().and_then(|left| {
             let mut left = left;
 
             while let Some(token) = self.ts.get() {
                 match token.kind {
-                    TokenKind::Multiply => left *= self.secondary()?, 
+                    TokenKind::Multiply => left *= self.secondary()?,
                     TokenKind::Divide => {
                         match self.secondary() {
                             Ok(0.0) => {
@@ -177,7 +178,7 @@ impl<'a> Calc<'a> {
         })
     }
 
-    pub fn factorial(&self, n: f64) -> Result<f64, String> {
+    pub fn naive_factorial(&self, n: f64) -> Result<f64, String> {
         if n.floor() != n || n < 0.0 {
             return Err("Factorial is only valid on the natural numbers (0, 1, 2, ... n)"
                 .to_string());
@@ -200,8 +201,8 @@ impl<'a> Calc<'a> {
             let mut left = left;
             while let Some(token) = self.ts.get() {
                 match token.kind {
-                    TokenKind::Factorial => left = self.factorial(left)?,
-                    TokenKind::Exponent => left = left.powf(self.primary()?), 
+                    TokenKind::Factorial => left = self.naive_factorial(left)?,
+                    TokenKind::Exponent => left = left.powf(self.primary()?),
                     _ => {
                         self.ts.putback(token);
                         break;
@@ -214,8 +215,7 @@ impl<'a> Calc<'a> {
     }
 
     pub fn primary(&mut self) -> Result<f64, String> {
-        let token = self.ts.get().expect("Primary called out of order");
-
+        let token = self.ts.get().expect("primary() called out of order");
         match token.kind {
             TokenKind::LParen => {
                 let expr = self.expression()?;
@@ -232,6 +232,7 @@ impl<'a> Calc<'a> {
             }
             TokenKind::Identifier => self.get_symbol(token.name.unwrap()),
             TokenKind::Minus => self.primary().map(|val| -val),
+            TokenKind::Plus => self.primary(),
             TokenKind::Number => Ok(token.value.expect("There should've been a value here")),
             _ => Err(format!("Expected a number, but got {:?}", token.kind)),
         }
@@ -242,6 +243,7 @@ impl<'a> Calc<'a> {
 #[derive(Debug, PartialEq)]
 pub enum TokenKind {
     Divide,
+    EOF,
     Exponent,
     Factorial,
     Identifier,
@@ -281,21 +283,19 @@ impl<'a> TokenStream<'a> {
         }
     }
 
-    /**
-     * Get the next token. If there are no tokens ready, parse the input for more.  If the file is
-     * EOF, return None
-     */
+    /// Get the next token. If there are no tokens ready, parse the input for more.  If the file is
+    /// EOF, return None
     pub fn get(&mut self) -> Option<Token> {
-        self.stream.pop_front().or_else(|| {
+        let token = self.stream.pop_front().or_else(|| {
             self.parse_line();
             self.stream.pop_front().map(|token| token)
-        })
+        });
+        token
     }
 
-    /**
-     * Push a token to the front of the stream.
-     * The token need never have been in the stream.
-     */
+
+    /// Push a token to the front of the stream.
+    /// The token need never have been in the stream.
     pub fn putback(&mut self, token: Token) {
         self.stream.push_front(token);
     }
@@ -337,6 +337,8 @@ impl<'a> TokenStream<'a> {
                 }
             }
         }
+
+        self.finish_token(Some(TokenKind::EOF));
     }
 
     pub fn add_token(&mut self, kind: TokenKind, value: Option<f64>, name: Option<String>) {
@@ -377,7 +379,8 @@ impl<'a> TokenStream<'a> {
         }
 
         if terminator.is_some() {
-            self.add_token(terminator.unwrap(), None, None);
+            let terminator = terminator.unwrap();
+            self.add_token(terminator, None, None);
         }
     }
 }
@@ -387,7 +390,7 @@ pub struct StringReader {
     cursor: usize,
 }
 
-// An implementation of the Read trait for Strings to test TokenStream without needing a file.
+/// An implementation of the Read trait for Strings to test TokenStream without needing a file.
 impl StringReader {
     pub fn new(string: String) -> Self {
         StringReader {
@@ -444,7 +447,8 @@ mod test {
 
         let mut sreader = StringReader::new(s_string.clone());
         let mut stringbuf = String::new();
-        sreader.read_to_string(&mut stringbuf);
+        assert_eq!(sreader.read_to_string(&mut stringbuf).unwrap(),
+                   s_string.len());
         assert_eq!(s_string, stringbuf);
     }
 
@@ -460,17 +464,96 @@ mod test {
                        value: Some(5.0),
                        name: None,
                    }));
+
         assert_eq!(ts.get(),
                    Some(Token {
                        kind: TokenKind::Plus,
                        value: None,
                        name: None,
                    }));
+
         assert_eq!(ts.get(),
                    Some(Token {
                        kind: TokenKind::Number,
                        value: Some(7.0),
                        name: None,
                    }));
+
+        assert_eq!(ts.get(),
+                   Some(Token {
+                       kind: TokenKind::Terminator,
+                       value: None,
+                       name: None,
+                   }));
+
+        assert_eq!(ts.get(),
+                   Some(Token {
+                       kind: TokenKind::EOF,
+                       value: None,
+                       name: None,
+                   }));
+
+        assert_eq!(ts.get(), None);
+    }
+
+    #[test]
+    fn calc_tests() {
+        assert_eq!(calculate("7 + 5;"), Ok(12.0));
+        assert_eq!(calculate("7 * 3 + 5;"), Ok(26.0));
+        assert_eq!(calculate(";;;;;;;;;;;;;;;;;;;;;;;;;;7 * 3 + 5;;;;;;;;;;;;;;;;;;;;;;;;;;;;"),
+                   Ok(26.0));
+        assert_eq!(calculate("7 * 3 + 5"), Ok(26.0));
+        assert_eq!(calculate("7 * (3 + 5)"), Ok(56.0));
+        assert_eq!(calculate("((((((((((((((((((((((((((((((((((((((7/2 * \
+                              10))))))))))))))))))))))))))))))))))))))"),
+                   Ok(35.0));
+        assert_eq!(calculate("let a = 5; let b = ((7/2 * 10) / a)-a-a-a; b;"),
+                   Ok(-8.0));
+        assert_eq!(calculate("5 % 2"), Ok(1.0));
+        assert_eq!(calculate("+31337"), Ok(31337.0));
+        assert_eq!(calculate("-31337"), Ok(-31337.0));
+        assert_eq!(calculate("0.25^2"), Ok(0.0625));
+        assert_eq!(calculate("1*2*3*4*5*6*7*8*9"), Ok(362880.0));
+    }
+
+    #[test]
+    fn factorial_tests() {
+        assert_eq!(calculate("0!"), Ok(1.0));
+        assert_eq!(calculate("1!"), Ok(1.0));
+        assert_eq!(calculate("2!"), Ok(2.0));
+        assert_eq!(calculate("3!"), Ok(6.0));
+        assert_eq!(calculate("4!"), Ok(24.0));
+        assert_eq!(calculate("5!"), Ok(120.0));
+        assert_eq!(calculate("6!"), Ok(720.0));
+        assert_eq!(calculate("7!"), Ok(5040.0));
+        assert_eq!(calculate("8!"), Ok(40320.0));
+        assert_eq!(calculate("9!"), Ok(362880.0));
+        assert_eq!(calculate("10!"), Ok(3628800.0));
+        assert_eq!(calculate("11!"), Ok(39916800.0));
+        assert_eq!(calculate("12!"), Ok(479001600.0));
+        assert_eq!(calculate("13!"), Ok(6227020800.0));
+        assert_eq!(calculate("14!"), Ok(87178291200.0));
+        assert_eq!(calculate("15!"), Ok(1307674368000.0));
+        assert_eq!(calculate("16!"), Ok(20922789888000.0));
+        assert_eq!(calculate("17!"), Ok(355687428096000.0));
+        assert_eq!(calculate("18!"), Ok(6402373705728000.0));
+        assert_eq!(calculate("19!"), Ok(121645100408832000.0));
+        assert_eq!(calculate("20!"), Ok(2432902008176640000.0));
+        assert_eq!(calculate("25!"), Ok(15511210043330985984000000.0));
+        assert_eq!(calculate("26!"), Ok(403291461126605635584000000.0));
+        assert_eq!(calculate("27!"), Ok(10888869450418352160768000000.0));
+
+        // 27! seems to be the limit for properly calculated factorials with rust's f64
+        // assert_eq!(calculate("28!"), Ok(304888344611713860501504000000.0));
+        // assert_eq!(calculate("29!"), Ok(8841761993739701954543616000000.0));
+        // assert_eq!(calculate("30!"), Ok(265252859812191058636308480000000.0));
+    }
+
+    fn calculate(stmt: &str) -> Result<f64, String> {
+        let stmt_str = stmt.to_string();
+        let mut buf = BufReader::new(StringReader::new(stmt_str));
+        let mut calculator = Calc::new(TokenStream::new(&mut buf));
+
+        calculator.run()
     }
 }
